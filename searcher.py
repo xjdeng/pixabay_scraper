@@ -2,8 +2,9 @@ try:
     from EasyWebdriver import Chrome
 except ImportError:
     from selenium.webdriver import Chrome
+from selenium.common.exceptions import StaleElementReferenceException
     
-import time, requests
+import time, requests, re
 from path import Path as path
 
 ALL_DONE = 1
@@ -32,10 +33,11 @@ class Search:
         self.load_database()
         self.baseurl = "https://pixabay.com/{}/search/{}/?&order=latest".format(imgtype, terms)
         self.imgtype = imgtype
-        self.delay = delay
+        self.delay_time = delay
         browser.get(self.baseurl)
-        self.pages = int(browser.find_element_by_css_selector("span[class='total--2-kq8 hideMd--482UI']").\
-                         get_attribute("innerHTML").replace("/ ",""))
+        tmp = browser.find_element_by_css_selector("span[class='total--2-kq8 hideMd--482UI']").\
+                         get_attribute("innerHTML").replace("/ ","")
+        self.pages = int(re.sub("[^0-9]", "", tmp))
         if safesearch:
             browser.find_element_by_css_selector("input[type='checkbox']").click()
         self.code_cache = [None]*(self.pages + 1)
@@ -44,28 +46,29 @@ class Search:
         
     def add_item(self, item):
         if item not in self.database:
-            self.dbf.writelines([item])
             self.database.add(item)
         
     def delay(self):
-        time.sleep(self.delay())
+        time.sleep(self.delay_time)
         
-    def download_all(self, smart = True):
+    def download_all(self, smart = True, max_images = float('inf')):
         if smart:
             page = self.smart_find_start()
         else:
             page = self.pages
-        while page > 0:
+        downloaded = 0
+        while (page > 0) & (downloaded < max_images):
             self.go_page(page)
             links = self.get_image_links()
             for link in links:
-                self.delay()
-                self.download_image(link)
+                if self.download_image(link):
+                    downloaded += 1
             page -= 1
       
     def download_image(self, url):
-        if self.link_in_db(url):
+        if not self.link_in_db(url):
             cur_url = self.browser.current_url
+            self.delay()
             self.browser.get(url)
             img_tags = self.browser.find_elements_by_tag_name('img')
             for it in img_tags:
@@ -74,12 +77,19 @@ class Search:
                         img_id = self.get_image_id(url)
                         dest = "{}/{}.jpg".format(self.dest_folder, img_id)
                         self.add_item(img_id)
-                        download_image(url, dest)
+                        download_image(bit, dest)
             self.browser.get(cur_url)
+            return True
+        else:
+            return False
 
     def get_image_links(self):
-        elems = self.browser.find_elements_by_css_selector("a[class='link--h3bPW']")
-        return [elem.get_attribute("href") for elem in elems]
+        try:
+            elems = self.browser.find_elements_by_css_selector("a[class='link--h3bPW']")
+            return [elem.get_attribute("href") for elem in elems]
+        except StaleElementReferenceException:
+            self.delay()
+            return self.get_image_links()
     
     def get_image_id(self, url):
         chunks = url.split("/")
@@ -100,9 +110,9 @@ class Search:
         return False
         
     def load_database(self):
-        database_dir = "{}/{}.txt".format(self.downloads, self.terms)
-        self.dbf = open(database_dir, 'a+')
-        self.database = set(self.dbf.readlines())
+        files = path(self.dest_folder).files()
+        fnamebases = [f.namebase for f in files]
+        self.database = set(fnamebases)
         
     def page_done_code(self, page = None):
         if page is not None:
