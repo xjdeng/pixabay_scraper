@@ -50,18 +50,32 @@ class Search:
     def delay(self):
         time.sleep(self.delay())
         
+    def download_all(self, smart = True):
+        if smart:
+            page = self.smart_find_start()
+        else:
+            page = self.pages
+        while page > 0:
+            self.go_page(page)
+            links = self.get_image_links()
+            for link in links:
+                self.delay()
+                self.download_image(link)
+            page -= 1
+      
     def download_image(self, url):
-        cur_url = self.browser.current_url
-        self.browser.get(url)
-        img_tags = self.browser.find_elements_by_tag_name('img')
-        for it in img_tags:
-            for bit in it.get_attribute('srcset').split(" "):
-                if bit.endswith("_1280.jpg"):
-                    img_id = self.get_image_id(url)
-                    dest = "{}/{}.jpg".format(self.dest_folder, img_id)
-                    self.add_item(img_id)
-                    download_image(url, dest)
-        self.browser.get(cur_url)
+        if self.link_in_db(url):
+            cur_url = self.browser.current_url
+            self.browser.get(url)
+            img_tags = self.browser.find_elements_by_tag_name('img')
+            for it in img_tags:
+                for bit in it.get_attribute('srcset').split(" "):
+                    if bit.endswith("_1280.jpg"):
+                        img_id = self.get_image_id(url)
+                        dest = "{}/{}.jpg".format(self.dest_folder, img_id)
+                        self.add_item(img_id)
+                        download_image(url, dest)
+            self.browser.get(cur_url)
 
     def get_image_links(self):
         elems = self.browser.find_elements_by_css_selector("a[class='link--h3bPW']")
@@ -79,6 +93,11 @@ class Search:
         newurl = "{}&pagi={}&".format(self.baseurl, page)
         self.browser.get(newurl)
         self.cur_page = page
+    
+    def link_in_db(self, url):
+        if self.get_image_id(url) in self.database:
+            return True
+        return False
         
     def load_database(self):
         database_dir = "{}/{}.txt".format(self.downloads, self.terms)
@@ -94,7 +113,7 @@ class Search:
         links = self.get_image_links()
         in_db = set()
         for link in links:
-            if self.get_image_id(link) in self.database:
+            if self.link_in_db(link):
                 in_db.add(True)
             else:
                 in_db.add(False)
